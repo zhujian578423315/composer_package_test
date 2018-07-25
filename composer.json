@@ -1,5 +1,5 @@
 {
-  "name": "zj/composertest",
+  "name": "zjcomposer/composertest",
   "description": "for laravel package test",
   "type": "library",
   "license": "MIT",
