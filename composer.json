@@ -17,6 +17,5 @@
     "psr-4": {
       "Test\\": "packages/zj/thirdpart/src/"
     }
-  },
-"minimum-stability": "stable"
+  }
 }
