@@ -1,5 +1,5 @@
 {
-  "name": "composer_package_test",
+  "name": "composerTest",
   "description": "for laravel package test",
   "type": "library",
   "license": "MIT",
