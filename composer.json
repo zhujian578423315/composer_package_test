@@ -3,6 +3,7 @@
   "description": "for laravel package test",
   "type": "library",
   "license": "MIT",
+   "version": "1.30.0",
   "authors": [
     {
       "name": "zj",
