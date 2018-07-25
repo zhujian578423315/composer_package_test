@@ -3,7 +3,7 @@
   "description": "for laravel package test",
   "type": "library",
   "license": "MIT",
-   "version": "1.30.0",
+   "version": "2.0.0",
   "authors": [
     {
       "name": "zj",
@@ -18,5 +18,5 @@
       "Test\\": "packages/zj/thirdpart/src/"
     }
   },
-  "minimum-stability": "dev"
+  "minimum-stability": "stable"
 }
