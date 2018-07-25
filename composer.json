@@ -17,5 +17,5 @@
       "Test\\": "packages/zj/thirdpart/src/"
     }
   },
-  "minimum-stability": "dev"
+  "minimum-stability": "stable"
 }
