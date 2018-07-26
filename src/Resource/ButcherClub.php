@@ -1,6 +1,6 @@
 <?php
 
-namespace Resource\ButcherClub;
+namespace ButcherClub\Resource;
 
 
 class ButcherClub
