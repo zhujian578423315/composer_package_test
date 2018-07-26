@@ -1,9 +1,9 @@
 {
-  "name": "zjcomposer/composertest",
-  "description": "for laravel package test",
+  "name": "ButcherClub",
+  "description": "for ButcherClub package",
   "type": "library",
   "license": "MIT",
-   "version": "3.6.0",
+   "version": "3.7.0",
   "authors": [
     {
       "name": "zj",
