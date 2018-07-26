@@ -12,6 +12,6 @@ class Test
 
     public function test()
     {
-        return 1;
+        return generate_uuid(4);
     }
 }
