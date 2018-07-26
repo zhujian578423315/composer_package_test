@@ -1,5 +1,5 @@
 <?php
-namespace Test\Facades;
+namespace ButcherClub\Facades;
 
 use Illuminate\Support\Facades\Facade;
 
