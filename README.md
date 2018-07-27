@@ -1,3 +1,3 @@
 # composer_package
-        \Test\test\ThirdPackageServiceProvider::class
-        'test'=> \Test\test\Test::class
+       \ButcherClub\Resource\ButcherClubServiceProvider::class
+       'ButcherClub'=>\ButcherClub\Resource\ButcherClubController::class
