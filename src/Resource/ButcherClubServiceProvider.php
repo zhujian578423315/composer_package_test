@@ -17,7 +17,7 @@ class ButcherClubServiceProvider extends ServiceProvider
     public function boot()
     {
         $this->publishes([
-            __DIR__.'/config/butcherClue.php' => config_path('butcherClue.php'), // 发布配置文件到 laravel 的config 下
+            __DIR__ . '/config/butcherclub.php' => config_path('butcherclub.php'), // 发布配置文件到 laravel 的config 下
         ]);
     }
 
@@ -29,9 +29,7 @@ class ButcherClubServiceProvider extends ServiceProvider
     public function register()
     {
         $this->app->singleton('butcherClue', function ($app) {
-                return new ButcherClub();
-//            return new Packagetest($app['session'], $app['config']);
-
+                return new ButcherClubController();
         });
     }
 
