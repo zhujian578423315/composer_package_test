@@ -9,12 +9,15 @@ use App\Models\Commerce\Goods\Payment\PaymentConfig;
 use App\Models\Commerce\Order\Order;
 use App\Models\Commerce\Order\PaymentTransaction;
 use App\Models\Members\User;
-use Dingo\Api\Http\Request;
 use GuzzleHttp\Client;
 use GuzzleHttp\RequestOptions;
+use Illuminate\Http\Request;
+use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
-class ButcherClubController
+class ButcherClubController extends Controller
 {
 
     protected $store_id;
@@ -24,25 +27,19 @@ class ButcherClubController
 
     }
 
-    public function getQRcode($order_id, $payment_config_id, $amount)
+    public function getQRcode($payment_transaction)
     {
-        $order = Order::findOrFail($order_id);
-        $payment_config = PaymentConfig::findOrFail($payment_config_id);
+        $order = $payment_transaction->order;
+        $payment_config = $payment_transaction->paymentConfig;
+        $amount = $payment_transaction->amount;
         $url = $this->config('url');
-        $key = $this->config('key');
-        $shop_id = $this->config('shop_id');
-        $out_trade_no = generate_payment_out_trade_no($order, $payment_config);
-        $client = new Client();
-        $body = [
-            'food_names' => json_encode(['abc']),
-            'price' => $amount,
-            'out_trade_no' => $out_trade_no,
-            'sign' => $this->sign($out_trade_no, $key),
-            'shop_id' => $shop_id,
-            'callback_url' => 'http://dev.leyao.webapp.wildstorm.cn:8080/delivery/eleme/callback'
-        ];
-        $res = $client->request('POST', $url, [RequestOptions::JSON => $body]);
-        $content = $res->getBody()->getContents();
+        $body = $this->make_ns_item($order, $payment_config, $amount);
+        try {
+            $content = (new Client())->request('post', $url, [RequestOptions::JSON => $body])->getBody()->getContents();
+        } catch (\Exception $e) {
+            throw  new HttpException('425', '支付请求失败:'.$e->getMessage());
+        }
+
         $json = json_decode($content, true, 512, JSON_BIGINT_AS_STRING);
 
         if (isset($json['str'])) {
@@ -62,15 +59,51 @@ class ButcherClubController
         }
     }
 
+    public function make_ns_item($order, $payment_config, $amount)
+    {
+        $ns_food_names = array();
+        $ns_food_nums = array();
+        $ns_food_prices = array();
+//        $ns_food_ids = array();
+//        $ns_food_codes = array();
+        foreach ($order->items as $item) {
+            if ($item->parent_id == null) {
+                array_push($ns_food_names, $item->goods->title);
+                array_push($ns_food_nums, $item->quantity);
+                array_push($ns_food_prices, $item->unitPrice);
+//                array_push($ns_food_ids,$item->goods_id);
+//                array_push($ns_food_codes,$item->goods->code);
+            }
+        }
+        $key = $this->config('key');
+        $shop_id = $this->config('shop_id');
+        $out_trade_no = generate_payment_out_trade_no($order, $payment_config);
+        $body = [
+            'food_names' => json_encode($ns_food_names),
+            'food_nums' => json_encode($ns_food_nums),
+            'food_prices' => json_encode($ns_food_prices),
+//            'food_ids' => json_encode($ns_food_ids),
+//            'food_codes' => json_encode($ns_food_codes),
+            'price' => abs($amount),
+            'discount'=>abs($order->adjustments_total),
+            'out_trade_no' => $out_trade_no,
+            'sign' => $this->sign($out_trade_no, $key),
+            'shop_id' => $shop_id,
+            'callback_url' => route('ns_callback')
+        ];
+        return $body;
+    }
+
+
     public function paymentCallback(Request $request)
     {
+        Log::info($request->all());
         $input = $request->all();
         $sign = $input['sign'];
         $out_trade_no = $input['out_trade_no'];
         if ($sign != $this->sign($out_trade_no, $key = $this->config('key'))) {
             throw new  HttpException('425', '验签失败');
         }
-
         $payment_transaction = PaymentTransaction::where('out_trade_no', $out_trade_no)->firstOrfail();
         $this->store_id = $payment_transaction->store_id;
         if ($payment_transaction && in_array($payment_transaction->state,
@@ -80,19 +113,22 @@ class ButcherClubController
             return $this->successResponse();
         }
         if ($input['code'] == 1) {
-            $payment = $input['payment'];
-            if ($payment == $payment_transaction->amount) {
-                $payment_transaction->state =
-                    ($payment_transaction->order->total == $payment_transaction->amount) ?
-                        PaymentTransaction::TRANSITION_PAY : PaymentTransaction::TRANSITION_PARTIALLY_PAY;
-                $paymentConfig = $this->nsPaymentConfig($input['payment_type']);
-                if ($paymentConfig) {
-                    $payment_transaction->payment_config_id = $paymentConfig->id;
-                }
-                if (!$payment_transaction->save()) {
-                    throw new HttpException(500, 'Update payment transaction state failed.');
-                }
-                event(new NotifyCompleted($payment_transaction));
+            if ($input['payment'] == $payment_transaction->amount) {
+                DB::transaction(function () use ($payment_transaction, $input) {
+                    $payment_transaction->state =
+                        ($payment_transaction->order->total == $payment_transaction->amount) ?
+                            PaymentTransaction::TRANSITION_PAY : PaymentTransaction::TRANSITION_PARTIALLY_PAY;
+                    $payment_config = $this->nsPaymentConfig($input['payment_type']);
+                    if ($payment_config) {
+                        $payment_transaction->out_trade_no = generate_payment_out_trade_no($payment_transaction->order, $payment_config);
+                        $payment_transaction->payment_config_id = $payment_config->id;
+                    }
+                    if (!$payment_transaction->save()) {
+                        throw new HttpException(500, 'Update payment transaction state failed.');
+                    }
+                    event(new NotifyCompleted($payment_transaction));
+                });
+                return $this->successResponse();
             }
         }
         return $this->faildResponse();
