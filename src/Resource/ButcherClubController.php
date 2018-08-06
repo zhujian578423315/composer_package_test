@@ -3,11 +3,14 @@
 namespace ButcherClub\Resource;
 
 
+use App\Leyao\Commerce\Sauce\Factory\AdjustmentFactory;
 use App\Leyao\Commerce\Sauce\Factory\PaymentTransactionFactory;
+use App\Leyao\Contracts\Commerce\Models\Order\AdjustmentInterface;
 use App\Leyao\Event\Store\Commerce\PaymentTransaction\NotifyCompleted;
 use App\Models\Commerce\Goods\Payment\PaymentConfig;
 use App\Models\Commerce\Order\Order;
 use App\Models\Commerce\Order\PaymentTransaction;
+use App\Models\Commerce\Promotion\Promotion;
 use App\Models\Members\User;
 use GuzzleHttp\Client;
 use GuzzleHttp\RequestOptions;
@@ -37,7 +40,7 @@ class ButcherClubController extends Controller
         try {
             $content = (new Client())->request('post', $url, [RequestOptions::JSON => $body])->getBody()->getContents();
         } catch (\Exception $e) {
-            throw  new HttpException('425', '支付请求失败:'.$e->getMessage());
+            throw  new HttpException('425', '支付请求失败:' . $e->getMessage());
         }
 
         $json = json_decode($content, true, 512, JSON_BIGINT_AS_STRING);
@@ -85,7 +88,7 @@ class ButcherClubController extends Controller
 //            'food_ids' => json_encode($ns_food_ids),
 //            'food_codes' => json_encode($ns_food_codes),
             'price' => abs($amount),
-            'discount'=>abs($order->adjustments_total),
+            'discount' => abs($order->adjustments_total),
             'out_trade_no' => $out_trade_no,
             'sign' => $this->sign($out_trade_no, $key),
             'shop_id' => $shop_id,
@@ -101,11 +104,11 @@ class ButcherClubController extends Controller
         $input = $request->all();
         $sign = $input['sign'];
         $out_trade_no = $input['out_trade_no'];
-        if ($sign != $this->sign($out_trade_no, $key = $this->config('key'))) {
-            throw new  HttpException('425', '验签失败');
-        }
+//        if ($sign != $this->sign($out_trade_no, $key = $this->config('key'))) {
+//            throw new  HttpException('425', '验签失败');
+//        }
         $payment_transaction = PaymentTransaction::where('out_trade_no', $out_trade_no)->firstOrfail();
-        $this->store_id = $payment_transaction->store_id;
+        $this->store_id = $payment_transaction->order->store_id;
         if ($payment_transaction && in_array($payment_transaction->state,
                 PaymentTransaction::COMPLETED_PAY_TRANSITIONS)
         ) {
@@ -113,27 +116,51 @@ class ButcherClubController extends Controller
             return $this->successResponse();
         }
         if ($input['code'] == 1) {
-            if ($input['payment'] == $payment_transaction->amount) {
-                DB::transaction(function () use ($payment_transaction, $input) {
-                    $payment_transaction->state =
-                        ($payment_transaction->order->total == $payment_transaction->amount) ?
-                            PaymentTransaction::TRANSITION_PAY : PaymentTransaction::TRANSITION_PARTIALLY_PAY;
-                    $payment_config = $this->nsPaymentConfig($input['payment_type']);
-                    if ($payment_config) {
-                        $payment_transaction->out_trade_no = generate_payment_out_trade_no($payment_transaction->order, $payment_config);
-                        $payment_transaction->payment_config_id = $payment_config->id;
-                    }
-                    if (!$payment_transaction->save()) {
-                        throw new HttpException(500, 'Update payment transaction state failed.');
-                    }
-                    event(new NotifyCompleted($payment_transaction));
-                });
-                return $this->successResponse();
-            }
+            DB::transaction(function () use ($payment_transaction, $input) {
+                $order = $payment_transaction->order;
+                //如果有优惠添加优惠
+                if (isset($input['Preferential_amount'])){
+                    $preferential_amount = $input['Preferential_amount'];
+                    $coupon = $input['coupon']??'';
+                    $adjustment = $this->makeNSAdjustment($coupon, $preferential_amount);
+                    $order->addAdjustment($adjustment);
+                    $order->adjustments()->save($adjustment);
+                    $order->save();
+                }
+                $payment_transaction->state =
+                    ($order->total == $payment_transaction->amount) ?
+                        PaymentTransaction::TRANSITION_PAY : PaymentTransaction::TRANSITION_PARTIALLY_PAY;
+                $payment_transaction->amount = $payment_transaction->amount - abs($preferential_amount??0);
+                $payment_config = $this->nsPaymentConfig($input['payment_type']);
+                if ($payment_config) {
+                    $payment_transaction->out_trade_no = generate_payment_out_trade_no($payment_transaction->order, $payment_config);
+                    $payment_transaction->payment_config_id = $payment_config->id;
+                }
+                if (!$payment_transaction->save()) {
+                    throw new HttpException(500, 'Update payment transaction state failed.');
+                }
+                event(new NotifyCompleted($payment_transaction));
+            });
+            return $this->successResponse();
         }
         return $this->faildResponse();
     }
 
+
+    protected function makeNSAdjustment($coupon, $amount)
+    {
+        $promotion = Promotion::where('name', 'NS折扣')->where('store_id', $this->store_id)->first();
+        $adjustment = [
+            "amount" => abs($amount) * (-1),
+            "modify_item_id" => null,
+            'label' => $coupon,
+            "type" => AdjustmentInterface::ORDER_PROMOTION_ADJUSTMENT,
+            "promotion_id" => is_null($promotion) ? '' : $promotion->id,
+        ];
+        $adjustment = AdjustmentFactory::makeOrigin($adjustment);
+        $adjustment->setLabel($coupon);
+        return $adjustment;
+    }
 
     protected function sign($out_trade_no, $key)
     {
